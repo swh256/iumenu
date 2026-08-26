@@ -49,7 +49,11 @@ jobs:
           git commit -m "menu: $(date -u +%Y-%m-%d)"
           git push
 
+      # enablement: 如果仓库还没开 Pages(或者开在"从分支部署"上),
+      # 这一步会直接用 API 把它切成 Actions 部署,不用去 Settings 里点。
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
