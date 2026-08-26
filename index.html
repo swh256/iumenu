@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>今天吃哪个食堂</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#990000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+  :root{
+    --crimson:#990000; --bg:#f6f5f3; --card:#fff; --ink:#1a1a1a; --dim:#6b6660;
+    --line:#e3ded7; --chip:#ece8e2; --ok:#1a7f4b; --shut:#a33;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --crimson:#e05a5a; --bg:#151412; --card:#1f1e1c; --ink:#ece9e4; --dim:#9a938a;
+           --line:#332f2b; --chip:#2b2825; --ok:#4ec98a; --shut:#e08080; }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink); font:16px/1.5 -apple-system,BlinkMacSystemFont,
+    "SF Pro SC","PingFang SC","Helvetica Neue",Arial,sans-serif;
+    padding:max(12px,env(safe-area-inset-top)) 12px calc(24px + env(safe-area-inset-bottom));
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:1100px;margin:0 auto}
+
+  header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  h1{font-size:19px;margin:0;letter-spacing:.2px}
+  h1 b{color:var(--crimson)}
+  .stamp{font-size:12px;color:var(--dim);margin-left:auto}
+
+  /* 餐段切换 */
+  .meals{display:flex;gap:6px;margin:12px 0 10px}
+  .meals button{
+    flex:1;padding:9px 0;font-size:15px;font-weight:600;border:1px solid var(--line);
+    background:var(--card);color:var(--dim);border-radius:10px;cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .meals button[aria-pressed="true"]{background:var(--crimson);border-color:var(--crimson);color:#fff}
+
+  /* 日期 */
+  .days{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;
+        scrollbar-width:none}
+  .days::-webkit-scrollbar{display:none}
+  .days button{
+    flex:0 0 auto;min-width:58px;padding:6px 10px;border:1px solid var(--line);
+    background:var(--card);color:var(--dim);border-radius:9px;cursor:pointer;
+    font:inherit;font-size:12px;line-height:1.25;text-align:center;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .days button b{display:block;font-size:15px;color:var(--ink)}
+  .days button[aria-pressed="true"]{border-color:var(--crimson);background:var(--chip)}
+  .days button[aria-pressed="true"] b{color:var(--crimson)}
+  .days button[data-shut="1"]{opacity:.45}
+
+  /* 食堂卡片 */
+  .halls{display:grid;gap:12px;grid-template-columns:1fr}
+  @media (min-width:760px){ .halls{grid-template-columns:repeat(3,1fr);align-items:start} }
+  .hall{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 15px}
+  .hall h2{margin:0;font-size:17px;display:flex;align-items:center;gap:8px}
+  .near{font-size:10px;font-weight:700;color:#fff;background:var(--crimson);
+        border-radius:4px;padding:1px 5px;letter-spacing:.4px}
+  .hrs{font-size:12px;color:var(--dim);margin:3px 0 0}
+  .hrs .open{color:var(--ok);font-weight:600}
+  .hrs .closed{color:var(--shut);font-weight:600}
+
+  .station{margin-top:12px;padding-top:11px;border-top:1px dashed var(--line)}
+  .station:first-of-type{border-top:0;padding-top:4px}
+  .station h3{margin:0 0 5px;font-size:12px;font-weight:700;letter-spacing:.6px;
+              text-transform:uppercase;color:var(--crimson)}
+  ul{margin:0;padding:0;list-style:none}
+  li{padding:2px 0 2px 13px;position:relative;font-size:15px}
+  li::before{content:"";position:absolute;left:2px;top:11px;width:4px;height:4px;
+             border-radius:50%;background:var(--line)}
+
+  .empty{color:var(--dim);font-size:14px;margin-top:10px}
+  .note{font-size:12px;color:var(--dim);background:var(--chip);border-radius:8px;
+        padding:6px 9px;margin-top:10px;line-height:1.4}
+  footer{margin-top:20px;font-size:11px;color:var(--dim);text-align:center;line-height:1.7}
+  footer a{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>今天吃<b>哪个食堂</b></h1>
+    <span class="stamp" id="stamp"></span>
+  </header>
+
+  <div class="meals" id="meals">
+    <button type="button" data-meal="lunch">午餐</button>
+    <button type="button" data-meal="dinner">晚餐</button>
+  </div>
+
+  <div class="days" id="days"></div>
+  <div class="halls" id="halls"></div>
+
+  <footer>
+    数据来自 IU Dining(Nutrislice)与 dining.indiana.edu,每天自动更新一次。<br>
+    只显示每日轮换的主档口 —— 沙拉吧、酸奶吧、面包甜点、料台这些常驻的不列。
+  </footer>
+</div>
+
+<script>
+const WD = ["周日","周一","周二","周三","周四","周五","周六"];
+let DATA = null, day = null, meal = null;
+
+// 只有 "Closed" / 空 才算关门;"9 a.m. - 2 p.m., 4 - 8 p.m." 这种分段照原样显示
+const isShut = s => !s || /^closed$/i.test(s.trim());
+
+function pickMeal(){
+  const h = new Date().getHours();
+  return h < 15 ? "lunch" : "dinner";   // 下午三点前默认看午餐
+}
+
+function renderDays(){
+  const box = document.getElementById("days");
+  box.innerHTML = "";
+  DATA.dates.forEach(d => {
+    // 三个食堂全关的日子(基本不会有)灰掉
+    const allShut = DATA.halls.every(h => isShut(h.hours[d]));
+    const dt = new Date(d + "T12:00:00");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.shut = allShut ? "1" : "0";
+    b.setAttribute("aria-pressed", d === day);
+    b.innerHTML = `${d === DATA.today ? "今天" : WD[dt.getDay()]}<b>${dt.getMonth()+1}/${dt.getDate()}</b>`;
+    b.onclick = () => { day = d; render(); };
+    box.appendChild(b);
+  });
+}
+
+function renderHalls(){
+  const box = document.getElementById("halls");
+  box.innerHTML = "";
+  DATA.halls.forEach((hall, i) => {
+    const d = DATA.days[day][hall.key];
+    const hours = hall.hours[day];
+    const shut = isShut(hours);
+    // 没拆午/晚的日子,allday 就是那天的全部;拆了的日子,allday 是两餐都有的。
+    // 同一个档口可能同时出现在 meal 和 allday 里,合并成一条,别出两个同名标题。
+    const groups = [];
+    if (!shut) {
+      const byStation = new Map();
+      [...(d[meal] || []), ...(d.allday || [])].forEach(g => {
+        const cur = byStation.get(g.station);
+        if (cur) cur.items.push(...g.items);
+        else { const m = {station: g.station, items: [...g.items]}; byStation.set(g.station, m); groups.push(m); }
+      });
+      groups.forEach(g => g.items = [...new Set(g.items)]);
+    }
+
+    const el = document.createElement("section");
+    el.className = "hall";
+    el.innerHTML = `
+      <h2>${hall.name}${i === 0 ? '<span class="near">最近</span>' : ""}</h2>
+      <p class="hrs">${shut ? '<span class="closed">今日不开</span>'
+                            : `<span class="open">${hours}</span>`}</p>`;
+
+    if (shut) {
+      // 关门就不用再说别的了
+    } else if (!groups.length) {
+      el.insertAdjacentHTML("beforeend", '<p class="empty">这天还没放菜单。</p>');
+    } else {
+      groups.forEach(g => {
+        const s = document.createElement("div");
+        s.className = "station";
+        s.innerHTML = `<h3>${g.station}</h3><ul>` +
+          g.items.map(x => `<li>${x}</li>`).join("") + "</ul>";
+        el.appendChild(s);
+      });
+      if (!d.split) el.insertAdjacentHTML("beforeend",
+        '<p class="note">这天营养师还没把菜单拆成午餐/晚餐,上面是全天的菜。临近当天会拆开。</p>');
+    }
+    box.appendChild(el);
+  });
+}
+
+function render(){
+  document.querySelectorAll("#meals button").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.meal === meal));
+  renderDays();
+  renderHalls();
+}
+
+document.querySelectorAll("#meals button").forEach(b =>
+  b.onclick = () => { meal = b.dataset.meal; render(); });
+
+fetch("data/menu.json?" + Date.now())
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(j => {
+    DATA = j;
+    day = j.dates.includes(j.today) ? j.today : j.dates[0];
+    meal = pickMeal();
+    const age = Math.round((Date.now() - new Date(j.generated_at)) / 36e5);
+    document.getElementById("stamp").textContent =
+      age < 1 ? "刚更新" : age < 48 ? `${age} 小时前更新` : `${Math.round(age/24)} 天前更新`;
+    render();
+  })
+  .catch(e => {
+    document.getElementById("halls").innerHTML =
+      `<p class="empty">菜单没读出来(${e})。可能是当天的抓取任务失败了。</p>`;
+  });
+</script>
+</body>
+</html>

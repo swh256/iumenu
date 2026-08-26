@@ -1,0 +1,44 @@
+name: refresh menu
+
+on:
+  schedule:
+    # 每天 10:00 UTC = 夏令时早 6 点 / 冬令时早 5 点(ET)。
+    # cron 只认 UTC,所以换季时刻会差一小时,对这个用途无所谓。
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - build.py
+      - .github/workflows/build.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-menu
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 抓菜单
+        run: python3 build.py
+
+      - name: 有变化才提交
+        run: |
+          if git diff --quiet -- data/menu.json; then
+            echo "菜单没变,不提交"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/menu.json
+          git commit -m "menu: $(date -u +%Y-%m-%d)"
+          git push

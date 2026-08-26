@@ -1,0 +1,9 @@
+{
+  "name": "今天吃哪个食堂",
+  "short_name": "食堂",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f6f5f3",
+  "theme_color": "#990000",
+  "icons": [{ "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }]
+}
