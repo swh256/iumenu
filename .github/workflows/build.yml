@@ -7,20 +7,26 @@ on:
     - cron: "0 10 * * *"
   workflow_dispatch:
   push:
-    paths:
-      - build.py
-      - .github/workflows/build.yml
+    branches: [main]
 
 permissions:
-  contents: write
+  contents: write   # 把新菜单 commit 回 main
+  pages: write      # 发布 Pages
+  id-token: write   # deploy-pages 要的 OIDC
 
+# 抓数据和发布放在同一个 job 里跑完。
+# 分成两个 workflow 是不行的:GITHUB_TOKEN 推的 commit 不会触发别的 workflow,
+# 每天那次机器人提交就永远不会带动 Pages 部署。
 concurrency:
-  group: refresh-menu
+  group: pages
   cancel-in-progress: false
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,3 +48,12 @@ jobs:
           git add data/menu.json
           git commit -m "menu: $(date -u +%Y-%m-%d)"
           git push
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
