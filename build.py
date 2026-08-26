@@ -21,6 +21,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zoneinfo
+
+# Actions 的 runner 跑在 UTC。ET 晚上 8 点之后 UTC 已经跨天,
+# 用 date.today() 会把明天当成今天 —— 正好是要看晚餐的时段。一律按布鲁明顿的本地日期算。
+BLOOMINGTON = zoneinfo.ZoneInfo("America/Indiana/Indianapolis")
 
 API = "https://indiana-dining.api.nutrislice.com/menu/api"
 HOURS_URL = "https://dining.indiana.edu/dining-hours/hours.cfml?DisplayConcept="
@@ -183,7 +188,7 @@ def parse_hours(page, today):
 
 
 def main():
-    today = datetime.date.today()
+    today = datetime.datetime.now(BLOOMINGTON).date()
     horizon = [today + datetime.timedelta(days=i) for i in range(HORIZON)]
     horizon_set = {d.isoformat() for d in horizon}
 
