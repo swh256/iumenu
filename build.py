@@ -87,6 +87,17 @@ COMPONENT_RE = re.compile(
     r"|(sauce|dressing|vinaigrette|aioli|glaze|glace|syrup|salsa|"
     r"salsa verde|flour tortilla|corn tortilla)$", re.I)
 
+# 荤素判定用。Nutrislice 的图标里没有 chicken 这一项(只有 Beef/Pork/Fish/Shellfish),
+# 而鸡肉菜占了一大半,所以必须补一份菜名词表。
+VEG_ICONS = {"Vegan", "Vegetarian"}
+MEAT_ICONS = {"Beef", "Pork", "Fish", "Shellfish"}
+MEAT_RE = re.compile(
+    r"\b(chicken|beef|pork|turkey|ham|bacon|sausage|steak|brisket|salmon|shrimp|fish|"
+    r"catfish|tuna|meatball|meat|pepperoni|lamb|duck|chorizo|bulgogi|gyro|anchovy|crab|"
+    r"clam|prosciutto|pastrami|wings?|ribs?|loin|tenderloin|patty melt|carnitas|tinga|"
+    r"barbacoa|andouille|pot roast|sloppy joe|philly|reuben|bratwurst|corned|jerk|tikka|"
+    r"tandoori|galbi|yakiniku|huli huli|veau|veal)\b", re.I)
+
 
 def fetch(url, tries=4):
     """带退避的 GET。Nutrislice 偶尔会 5xx。"""
@@ -139,8 +150,26 @@ def resolve_stations(schools):
     return resolved, problems
 
 
+def kind_of(name, icons):
+    """荤素判定 -> "meat" / "veg" / None(判不出来就不标,别猜)。
+
+    Nutrislice 只给 Beef / Pork / Fish / Shellfish 四种肉的图标,**没有 chicken**,
+    所以鸡肉/火鸡只能靠菜名认。素标必须排在最前面 —— "Vegan Chorizo"、
+    "Plant Based Chicken Tenders" 的菜名里有肉字,但它们确实是素的。
+    """
+    if icons & VEG_ICONS:
+        return "veg"
+    if icons & MEAT_ICONS:
+        return "meat"
+    if MEAT_RE.search(name):
+        return "meat"
+    if "Halal" in icons:      # IU 的 Halal 标基本只打在清真肉上
+        return "meat"
+    return None
+
+
 def parse_menu_week(payload):
-    """一周的响应 -> {date: [(section, dish), ...]}"""
+    """一周的响应 -> {date: [(section, dish, kind), ...]}"""
     out = {}
     for day in payload.get("days") or []:
         section, rows = None, []
@@ -150,7 +179,10 @@ def parse_menu_week(payload):
                 continue
             food = item.get("food")
             if food and food.get("name"):
-                rows.append((section, food["name"].strip()))
+                icons = {i.get("synced_name")
+                         for i in (food.get("icons") or {}).get("food_icons") or []}
+                name = food["name"].strip()
+                rows.append((section, name, kind_of(name, icons)))
         if rows:
             out[day["date"]] = rows
     return out
@@ -204,7 +236,7 @@ def main():
     if not resolved:
         sys.exit("所有档口都没解析出来,不写 data —— 先去看 API 是不是改了")
 
-    # raw[hall][station][date] = [(section, dish)]
+    # raw[hall][station][date] = [(section, dish, kind)]
     raw = collections.defaultdict(lambda: collections.defaultdict(dict))
     calls = 0
     for hall in HALLS:
@@ -222,7 +254,7 @@ def main():
             n = len(days) or 1
             seen = collections.Counter()
             for rows in days.values():
-                for dish in {d for _, d in rows}:
+                for dish in {d for _, d, _k in rows}:
                     seen[dish] += 1
             staples[(hall_key, station)] = {d for d, c in seen.items() if c / n >= STAPLE_RATIO}
 
@@ -236,8 +268,8 @@ def main():
                 rows = raw[hall["key"]][name].get(date)
                 if not rows:
                     continue
-                picked = collections.defaultdict(list)
-                for section, dish in rows:
+                picked = collections.defaultdict(dict)   # dish -> kind,dict 兼做去重+保序
+                for section, dish, kind in rows:
                     if section in DROP_SECTIONS:
                         continue
                     if dish in staples[(hall["key"], name)]:
@@ -245,15 +277,13 @@ def main():
                     if is_noise(dish):
                         continue
                     meal = MEAL_OF_SECTION.get(section or "", "allday")
-                    if meal == "both":
-                        picked["lunch"].append(dish)
-                        picked["dinner"].append(dish)
-                    else:
-                        picked[meal].append(dish)
+                    for m in (("lunch", "dinner") if meal == "both" else (meal,)):
+                        picked[m].setdefault(dish, kind)
                 for meal, dishes in picked.items():
                     if dishes:
-                        # 去重但保序
-                        buckets[meal].append({"station": name, "items": list(dict.fromkeys(dishes))})
+                        buckets[meal].append({"station": name, "items": [
+                            {"name": d, "kind": k} if k else {"name": d}
+                            for d, k in dishes.items()]})
             # 这天是不是还没被拆成午/晚
             split = bool(buckets["lunch"] or buckets["dinner"])
             per_hall[hall["key"]] = {**buckets, "split": split}

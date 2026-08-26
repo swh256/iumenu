@@ -8,7 +8,8 @@ IU Bloomington 的 Collins / McNutt / Wright 三个食堂,今天午餐和晚餐�
 - 只看这三个食堂(其余四个太远)
 - 只看**午餐和晚餐**,不看早餐
 - 只列**每天轮换的档口**。沙拉吧、酸奶吧、面包甜点、薯条料台这些常驻的整档不显示
-- 只给菜名。不标热量、不标过敏原
+- 只给菜名,外加一个荤素符号(🥩 / 🌱)。不标热量、不标过敏原
+- 页面文字是英文
 
 ## 为什么要有 build.py,不能页面直连
 
@@ -41,6 +42,12 @@ CORS 拦掉。所以由 GitHub Actions 每天跑一次 `build.py`,把结果 comm
 (番茄酱、白米饭、常年供应的 Grilled Cheese),不显示。这样 IU 改菜单也不用改代码。
 剩下漏网的早餐菜和台面配料靠 `BREAKFAST_RE` / `COMPONENT_RE` 两个正则兜底。
 
+**3. 荤素是拼出来的,Nutrislice 没有「鸡肉」这个图标。**
+它只给 Beef / Pork / Fish / Shellfish 四种,而鸡肉菜占了一大半,所以 `kind_of()` 是
+三层判定:先看 Vegan/Vegetarian 图标(必须最优先 —— "Vegan Chorizo"、
+"Plant Based Chicken Tenders" 菜名里有肉字但确实是素的),再看那四个肉图标,
+最后才用 `MEAT_RE` 认菜名。判不出来的就不标,不猜。实测 245 道菜里只有 9 道判不出来。
+
 ## 改哪里
 
 | 想改 | 改 `build.py` 的 |
@@ -49,6 +56,7 @@ CORS 拦掉。所以由 GitHub Actions 每天跑一次 `build.py`,把结果 comm
 | 加/减档口 | `KEEP_STATIONS`(按档口**显示名**,不要用 slug 或数字 id) |
 | 常驻项判定松紧 | `STAPLE_RATIO`(默认 0.5) |
 | 页面显示几天 | `HORIZON`(默认 7) |
+| 荤素词表 | `MEAT_RE` / `VEG_ICONS` / `MEAT_ICONS` |
 
 档口是按显示名解析的。如果 IU 改了档口名,`build.py` 会在日志里吼
 「档口 X 不在了,现有:[...]」,并且**不会**把这个档口静默丢掉。
