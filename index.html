@@ -12,11 +12,13 @@
 <style>
   :root{
     --crimson:#990000; --bg:#f6f5f3; --card:#fff; --ink:#1a1a1a; --dim:#6b6660;
-    --line:#e3ded7; --chip:#ece8e2; --ok:#1a7f4b; --shut:#a33;
+    --line:#e3ded7; --chip:#ece8e2; --ok:#1a7f4b; --shut:#a33; --warnbg:#fdf3e3;
+    --warnink:#7a5209; --warnline:#e8d5ae;
   }
   @media (prefers-color-scheme:dark){
     :root{ --crimson:#e05a5a; --bg:#151412; --card:#1f1e1c; --ink:#ece9e4; --dim:#9a938a;
-           --line:#332f2b; --chip:#2b2825; --ok:#4ec98a; --shut:#e08080; }
+           --line:#332f2b; --chip:#2b2825; --ok:#4ec98a; --shut:#e08080;
+           --warnbg:#2e2617; --warnink:#e8c07a; --warnline:#4a3d22; }
   }
   *{box-sizing:border-box}
   html,body{margin:0}
@@ -32,6 +34,9 @@
   h1{font-size:19px;margin:0;letter-spacing:.2px}
   h1 b{color:var(--crimson)}
   .stamp{font-size:12px;color:var(--dim);margin-left:auto}
+
+  .banner{background:var(--warnbg);color:var(--warnink);border:1px solid var(--warnline);
+          border-radius:10px;padding:8px 11px;font-size:13px;line-height:1.45;margin:10px 0 0}
 
   .meals{display:flex;gap:6px;margin:12px 0 10px}
   .meals button{
@@ -91,6 +96,8 @@
     <span class="stamp" id="stamp"></span>
   </header>
 
+  <div id="banner"></div>
+
   <div class="meals" id="meals">
     <button type="button" data-meal="lunch">Lunch</button>
     <button type="button" data-meal="dinner">Dinner</button>
@@ -110,28 +117,59 @@
 <script>
 const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MARK = { meat: "🥩", veg: "🌱" };
+
+// "Today" comes from the phone's own clock, never from the data file. The build
+// stamps its own date in, and if the daily refresh is late or fails that stamp is
+// yesterday — which used to make the page label yesterday as "Today".
+const TODAY = (() => {
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+})();
+
 let DATA = null, day = null, meal = null;
 
-// Only a literal "Closed" (or nothing) means shut. Split shifts like
-// "9 a.m. - 2 p.m., 4 - 8 p.m." are shown verbatim.
-const isShut = s => !s || /^closed$/i.test(s.trim());
+// Three states, not two. A hall with no hours data is NOT closed — that used to
+// hide every menu on the site whenever the hours scrape broke.
+function hoursFor(hall, date){
+  const h = hall.hours;
+  if (!h || !h[date]) return {state:"unknown", text:"Hours unavailable"};
+  const t = h[date].trim();
+  if (/^closed$/i.test(t)) return {state:"closed", text:"Closed today"};
+  return {state:"open", text:t};
+}
 
 // Before 3pm you're deciding about lunch; after that, dinner.
 const pickMeal = () => new Date().getHours() < 15 ? "lunch" : "dinner";
 
-const esc = s => s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s => String(s).replace(/[&<>"]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function renderBanner(){
+  const box = document.getElementById("banner");
+  const msgs = [];
+  if (!DATA.dates.includes(TODAY)) {
+    msgs.push(`This menu was built for ${DATA.today} and doesn't cover today ` +
+              `(${TODAY}). The daily refresh may have failed.`);
+  }
+  if (DATA.halls.some(h => !h.hours)) {
+    msgs.push("Opening hours couldn't be fetched for some halls — menus below are " +
+              "still accurate, but check the hall is open before you walk over.");
+  }
+  box.innerHTML = msgs.map(m => `<p class="banner">${esc(m)}</p>`).join("");
+}
 
 function renderDays(){
   const box = document.getElementById("days");
   box.innerHTML = "";
   DATA.dates.forEach(d => {
-    const allShut = DATA.halls.every(h => isShut(h.hours[d]));
+    // Only grey out a day when every hall is *known* to be closed.
+    const allShut = DATA.halls.every(h => hoursFor(h, d).state === "closed");
     const dt = new Date(d + "T12:00:00");
     const b = document.createElement("button");
     b.type = "button";
     b.dataset.shut = allShut ? "1" : "0";
     b.setAttribute("aria-pressed", d === day);
-    b.innerHTML = `${d === DATA.today ? "Today" : WD[dt.getDay()]}` +
+    b.innerHTML = `${d === TODAY ? "Today" : WD[dt.getDay()]}` +
                   `<b>${dt.getMonth()+1}/${dt.getDate()}</b>`;
     b.onclick = () => { day = d; render(); };
     box.appendChild(b);
@@ -143,13 +181,12 @@ function renderHalls(){
   box.innerHTML = "";
   DATA.halls.forEach((hall, i) => {
     const d = DATA.days[day][hall.key];
-    const hours = hall.hours[day];
-    const shut = isShut(hours);
+    const hrs = hoursFor(hall, day);
 
     // A station can show up in both the meal bucket and the all-day bucket;
     // merge them so its heading is not printed twice.
     const groups = [];
-    if (!shut) {
+    if (hrs.state !== "closed") {
       const byStation = new Map();
       [...(d[meal] || []), ...(d.allday || [])].forEach(g => {
         const cur = byStation.get(g.station);
@@ -162,30 +199,33 @@ function renderHalls(){
       });
     }
 
+    const cls = {open:"open", closed:"closed", unknown:""}[hrs.state];
     const el = document.createElement("section");
     el.className = "hall";
     el.innerHTML = `
       <h2>${esc(hall.name)}${i === 0 ? '<span class="near">Closest</span>' : ""}</h2>
-      <p class="hrs">${shut ? '<span class="closed">Closed today</span>'
-                            : `<span class="open">${esc(hours)}</span>`}</p>`;
+      <p class="hrs">${cls ? `<span class="${cls}">${esc(hrs.text)}</span>`
+                           : esc(hrs.text)}</p>`;
 
-    if (!shut && !groups.length) {
-      el.insertAdjacentHTML("beforeend", '<p class="empty">No menu posted yet.</p>');
-    } else if (!shut) {
-      groups.forEach(g => {
-        const s = document.createElement("div");
-        s.className = "station";
-        s.innerHTML = `<h3>${esc(g.station)}</h3><ul>` + g.items.map(it => {
-          const m = MARK[it.kind];
-          const mark = m ? `<span class="k" title="${it.kind}">${m}</span>`
-                         : '<span class="k unknown" title="not tagged"></span>';
-          return `<li>${mark}${esc(it.name)}</li>`;
-        }).join("") + "</ul>";
-        el.appendChild(s);
-      });
-      if (!d.split) el.insertAdjacentHTML("beforeend",
-        '<p class="note">IU hasn\'t split this day into lunch and dinner yet — ' +
-        'this is everything served that day. It gets split closer to the date.</p>');
+    if (hrs.state !== "closed") {
+      if (!groups.length) {
+        el.insertAdjacentHTML("beforeend", '<p class="empty">No menu posted yet.</p>');
+      } else {
+        groups.forEach(g => {
+          const s = document.createElement("div");
+          s.className = "station";
+          s.innerHTML = `<h3>${esc(g.station)}</h3><ul>` + g.items.map(it => {
+            const m = MARK[it.kind];
+            const mark = m ? `<span class="k" title="${esc(it.kind)}">${m}</span>`
+                           : '<span class="k unknown" title="not tagged"></span>';
+            return `<li>${mark}${esc(it.name)}</li>`;
+          }).join("") + "</ul>";
+          el.appendChild(s);
+        });
+        if (!d.split) el.insertAdjacentHTML("beforeend",
+          '<p class="note">IU hasn\'t split this day into lunch and dinner yet — ' +
+          'this is everything served that day. It gets split closer to the date.</p>');
+      }
     }
     box.appendChild(el);
   });
@@ -194,6 +234,7 @@ function renderHalls(){
 function render(){
   document.querySelectorAll("#meals button").forEach(b =>
     b.setAttribute("aria-pressed", b.dataset.meal === meal));
+  renderBanner();
   renderDays();
   renderHalls();
 }
@@ -205,7 +246,9 @@ fetch("data/menu.json?" + Date.now())
   .then(r => r.ok ? r.json() : Promise.reject(r.status))
   .then(j => {
     DATA = j;
-    day = j.dates.includes(j.today) ? j.today : j.dates[0];
+    // Land on today; if the data is stale, land on the soonest day it does cover.
+    day = j.dates.includes(TODAY) ? TODAY
+        : (j.dates.find(d => d >= TODAY) || j.dates[j.dates.length - 1]);
     meal = pickMeal();
     const age = Math.round((Date.now() - new Date(j.generated_at)) / 36e5);
     document.getElementById("stamp").textContent =
@@ -215,7 +258,7 @@ fetch("data/menu.json?" + Date.now())
   })
   .catch(e => {
     document.getElementById("halls").innerHTML =
-      `<p class="empty">Couldn't load the menu (${esc(String(e))}). ` +
+      `<p class="empty">Couldn't load the menu (${esc(e)}). ` +
       `The daily refresh may have failed.</p>`;
   });
 </script>

@@ -61,3 +61,16 @@ jobs:
 
       - id: deploy
         uses: actions/deploy-pages@v4
+
+      # 放在部署之后:即使上游改了结构,菜单该更新还是更新、站点该发还是发,
+      # 但这次运行会变红并发邮件。2026-09 那次 IU 换 DisplayConcept 的键,
+      # 就是因为没有这一步,静默坏了一整天都没人知道。
+      - name: 有警告就把这次运行标红
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          warnings = json.load(open("data/menu.json")).get("warnings") or []
+          for w in warnings:
+              print(f"::error::{w}")
+          sys.exit(1 if warnings else 0)
+          PY

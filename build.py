@@ -39,15 +39,17 @@ LOOKBACK_WEEKS = 3
 # 某道菜在一个档口出现的天数占比超过这个值,就当成常驻(酱料/主食/长期供应),不显示
 STAPLE_RATIO = 0.5
 
-# 只看这三个食堂。key 用于页面,slug 是 Nutrislice 的,concept 是 dining.indiana.edu
-# 营业时间页的内部名(注意跟页面显示名不一样,比如 Goodbody 那边是 "Goodbody Eatery")。
+# 只看这三个食堂。key 用于页面,slug 是 Nutrislice 的。
+# hours_match 用来在营业时间页上认出这个食堂 —— 不要写死 DisplayConcept 的值:
+# IU 在 2026-09 把它从全名("McNutt Dining Hall")换成了短名("McNutt"),
+# 旧键既不报错也不 404,只是不渲染详情面板,整站静默变成 "Closed"。
 HALLS = [
     {"key": "collins", "name": "Collins", "slug": "collins-eatery",
-     "concept": "Collins Eatery"},
+     "hours_match": re.compile(r"collins", re.I)},
     {"key": "mcnutt", "name": "McNutt", "slug": "mcnutt-dining-hall",
-     "concept": "McNutt Dining Hall"},
+     "hours_match": re.compile(r"mcnutt", re.I)},
     {"key": "wright", "name": "Wright", "slug": "wright-eatery",
-     "concept": "Wright Dining Hall"},
+     "hours_match": re.compile(r"wright", re.I)},
 ]
 
 # 每天轮换的「正经档口」。剩下的(沙拉吧、酸奶吧、面包甜点、料台、薯条吧…)整档丢掉。
@@ -194,6 +196,22 @@ def is_noise(name):
             or name.lower() in BREAKFAST_EXACT)
 
 
+def resolve_concepts(page):
+    """营业时间总览页 -> [(DisplayConcept 的键, 卡片上的显示名), ...]
+
+    页面结构是 <a href="?DisplayConcept=McNutt"> … <p class="title">McNutt Quad Dining Hall</p></a>。
+    键是内部短名、显示名是给人看的,两者都会变,所以按显示名去认,把键当成运行时解析出来的东西。
+    """
+    out = []
+    for block in re.findall(r'(?is)<a href="\?DisplayConcept=([^"]+)"(.*?)</a>', page):
+        key, body = block
+        title = re.search(r'(?is)<p class="title">(.*?)</p>', body)
+        if title:
+            out.append((html.unescape(key),
+                        html.unescape(re.sub(r"<[^>]+>", "", title.group(1))).strip()))
+    return out
+
+
 def parse_hours(page, today):
     """营业时间页那张表 -> {date: '7 a.m. - 9 p.m.'}"""
     block = re.search(r"(?is)<h4>Hours.*?</h4>.*?<table>(.*?)</table>", page)
@@ -289,13 +307,25 @@ def main():
             per_hall[hall["key"]] = {**buckets, "split": split}
         out_days[date] = per_hall
 
-    # 营业时间
+    # 营业时间。抓不到就写 None(不是 {}) —— 页面靠这个区分「今天不开」和「时间没拿到」,
+    # 否则一次抓取失败会让三个食堂全都显示成关门,而菜单其实好好的。
     hours = {}
+    index_page = fetch_text(HOURS_URL.split("?")[0])
+    concepts = resolve_concepts(index_page) if index_page else []
+    if not concepts:
+        problems.append("营业时间总览页没解析出任何 DisplayConcept,页面结构可能变了")
     for hall in HALLS:
-        page = fetch_text(HOURS_URL + urllib.parse.quote(hall["concept"]))
+        hit = [k for k, title in concepts if hall["hours_match"].search(title)]
+        if not hit:
+            problems.append(
+                f"{hall['name']}: 在营业时间页上认不出来。现有:{[t for _k, t in concepts][:12]}")
+            hours[hall["key"]] = None
+            continue
+        page = fetch_text(HOURS_URL + urllib.parse.quote(hit[0]))
         h = parse_hours(page, today) if page else {}
         if not h:
-            print(f"!! {hall['name']} 营业时间没解析出来", file=sys.stderr)
+            problems.append(f"{hall['name']}: DisplayConcept={hit[0]!r} 取到了页面但没解析出时间表")
+            h = None
         hours[hall["key"]] = h
 
     by_slug = {s["slug"]: s for s in schools}
@@ -309,7 +339,7 @@ def main():
             "name": h["name"],
             "full_name": by_slug.get(h["slug"], {}).get("name", h["name"]),
             "address": by_slug.get(h["slug"], {}).get("address", ""),
-            "hours": hours.get(h["key"], {}),
+            "hours": hours.get(h["key"]),
         } for h in HALLS],
         "days": out_days,
         "warnings": problems,
@@ -318,6 +348,8 @@ def main():
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    for p_ in problems:
+        print(f"!! {p_}", file=sys.stderr)
     size = os.path.getsize(OUT)
     total = sum(len(g["items"]) for d in out_days.values() for hall in d.values()
                 for m in ("lunch", "dinner", "allday") for g in hall[m])
