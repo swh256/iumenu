@@ -130,9 +130,12 @@ let DATA = null, day = null, meal = null;
 
 // Three states, not two. A hall with no hours data is NOT closed — that used to
 // hide every menu on the site whenever the hours scrape broke.
+// IU's hours table only runs a few days ahead (since 2026-10 it stops at Sunday or
+// so), so a missing date in an otherwise fetched table just hasn't been posted.
 function hoursFor(hall, date){
   const h = hall.hours;
-  if (!h || !h[date]) return {state:"unknown", text:"Hours unavailable"};
+  if (!h) return {state:"unknown", text:"Hours unavailable"};
+  if (!h[date]) return {state:"unknown", text:"Hours not posted yet"};
   const t = h[date].trim();
   if (/^closed$/i.test(t)) return {state:"closed", text:"Closed today"};
   return {state:"open", text:t};

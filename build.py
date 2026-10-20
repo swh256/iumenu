@@ -213,22 +213,33 @@ def resolve_concepts(page):
 
 
 def parse_hours(page, today):
-    """营业时间页那张表 -> {date: '7 a.m. - 9 p.m.'}"""
-    block = re.search(r"(?is)<h4>Hours.*?</h4>.*?<table>(.*?)</table>", page)
+    """营业时间页那张表 -> {date: '7 a.m. – 9 p.m.'}
+
+    按「含 <th>Today</th> 的那张 table」定位,不靠周围的标题和属性:
+    2026-10 IU 删掉了表格上方的 <h4>Hours (for the next seven days)</h4>,
+    <table> 也加了 style,原来锚在 <h4>Hours 上的正则又静默解析成空。
+    总览页(和用错键时的页面)里一张 table 都没有,所以这样认不会认错。
+    """
+    block = re.search(
+        r"(?is)<table\b[^>]*>((?:(?!</table>).)*?<th\b[^>]*>\s*Today\s*</th>.*?)</table>", page)
     if not block:
         return {}
     weekdays = {d: i for i, d in enumerate(
         ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"])}
     out = {}
     for label, value in re.findall(
-            r"(?is)<th>(.*?)</th>\s*<td>(.*?)</td>", block.group(1)):
+            r"(?is)<th\b[^>]*>((?:(?!</th>).)*?)</th>\s*<td\b[^>]*>(.*?)</td>", block.group(1)):
         label = html.unescape(re.sub(r"<[^>]+>", "", label)).strip()
         value = html.unescape(re.sub(r"<[^>]+>", "", value)).strip()
         value = re.sub(r"\s+", " ", value)
+        # 写法也换过:"7 a.m. - 9 p.m." -> "7 a.m.–9 p.m."(en dash、不带空格)。
+        # 统一成带空格的 en dash,页面上看着一致。
+        value = re.sub(r"\s*[-–—]\s*", " – ", value)
         if label == "Today":
             out[today.isoformat()] = value
         elif label in weekdays:
-            # 页面只给未来七天,所以往后找第一个匹配的星期几
+            # 页面最多给一周(2026-10 改版后周二只列到周日,共 6 行),
+            # 所以往后找第一个匹配的星期几
             for step in range(1, 8):
                 d = today + datetime.timedelta(days=step)
                 if d.weekday() == weekdays[label]:
@@ -326,6 +337,10 @@ def main():
         if not h:
             problems.append(f"{hall['name']}: DisplayConcept={hit[0]!r} 取到了页面但没解析出时间表")
             h = None
+        elif today.isoformat() not in h:
+            # 表里永远有 Today 那一行。解析出了东西却没有今天,说明只认出了一部分行,
+            # 不能当成正常结果静默放过去。(不按行数报:改版后表格本来就不满七天。)
+            problems.append(f"{hall['name']}: 时间表解析出了 {sorted(h)},但没有今天 {today}")
         hours[hall["key"]] = h
 
     by_slug = {s["slug"]: s for s in schools}
