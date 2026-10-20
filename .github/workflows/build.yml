@@ -28,9 +28,9 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -49,18 +49,21 @@ jobs:
           git commit -m "menu: $(date -u +%Y-%m-%d)"
           git push
 
-      # enablement: 如果仓库还没开 Pages(或者开在"从分支部署"上),
-      # 这一步会直接用 API 把它切成 Actions 部署,不用去 Settings 里点。
-      - uses: actions/configure-pages@v5
+      # enablement 只在仓库还没开 Pages 时尝试开启,而且按文档要非 GITHUB_TOKEN 的 token;
+      # 已经开在「从分支部署」上时它不会切成 Actions 部署 —— 那得去 Settings → Pages → Source
+      # 手动选 GitHub Actions,否则每次 push 还会多跑一个 pages-build-deployment 跟这里抢部署。
+      - uses: actions/configure-pages@v6
         with:
           enablement: true
 
-      - uses: actions/upload-pages-artifact@v3
+      # v4 起默认不打包点文件,.nojekyll 不会进 artifact。无所谓:
+      # Actions 部署不跑 Jekyll,站点里也没有下划线开头的文件。
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: .
 
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
       # 放在部署之后:即使上游改了结构,菜单该更新还是更新、站点该发还是发,
       # 但这次运行会变红并发邮件。2026-09 那次 IU 换 DisplayConcept 的键,
